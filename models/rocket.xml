@@ -1,0 +1,105 @@
+<mujoco model="rocket_recovery">
+  <!--
+    Vector-thrust rocket recovery scene.
+    - Rocket: slender cylinder with a 6-DOF free joint.
+    - Engine: a two-axis gimbaled nozzle (thrust vectoring). Deflecting the
+      nozzle re-points the thrust vector, which produces a control torque about
+      the center of mass (the real TVC mechanism).
+    - Launch pad: a box on the ground with an "H" landing mark made of 3 bars.
+    Coordinate convention: +Z is up, rocket long axis is along its local +Z.
+  -->
+  <compiler angle="degree" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="140" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.1 0.15 0.2"
+             width="512" height="512" mark="cross" markrgb="0.8 0.8 0.8"/>
+    <material name="grid" texture="grid" texrepeat="20 20" reflectance="0.1"/>
+    <material name="pad"   rgba="0.12 0.12 0.14 1" reflectance="0.2"/>
+    <material name="mark"  rgba="0.95 0.95 0.95 1"/>
+    <material name="body"  rgba="0.85 0.85 0.88 1" reflectance="0.3"/>
+    <material name="dark"  rgba="0.2 0.2 0.22 1"/>
+    <material name="flame" rgba="1.0 0.5 0.1 1"/>
+  </asset>
+
+  <default>
+    <joint armature="0.01" damping="2"/>
+    <geom solref="0.01 1" solimp="0.95 0.99 0.001"/>
+    <!-- collision groups: rocket geoms (type1/aff2) hit the world (type2/aff1)
+         but never each other, so the gimbaled nozzle can't self-collide. -->
+    <default class="rocket">
+      <geom contype="1" conaffinity="2"/>
+    </default>
+    <default class="world">
+      <geom contype="2" conaffinity="1"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <light name="sun" pos="10 10 30" dir="-0.3 -0.3 -1" directional="true"/>
+    <geom name="ground" type="plane" size="0 0 0.05" material="grid" condim="3" class="world"/>
+
+    <!-- ===== Launch pad + H landing mark ===== -->
+    <body name="pad" pos="0 0 0">
+      <geom name="pad" type="box" size="3 3 0.1" pos="0 0 0.1" material="pad" class="world"/>
+      <!-- "H" mark: two vertical bars + one cross bar, lying flat on the pad top -->
+      <geom name="h_left"  type="box" size="0.12 0.9 0.012" pos="-0.7 0 0.205" material="mark" contype="0" conaffinity="0"/>
+      <geom name="h_right" type="box" size="0.12 0.9 0.012" pos=" 0.7 0 0.205" material="mark" contype="0" conaffinity="0"/>
+      <geom name="h_cross" type="box" size="0.7 0.12 0.012" pos="0 0 0.205" material="mark" contype="0" conaffinity="0"/>
+      <!-- target site used by the controller as the touchdown reference -->
+      <site name="h_marker" pos="0 0 0.21" size="0.08" rgba="1 0 0 0.0"/>
+    </body>
+
+    <!-- ===== Rocket ===== -->
+    <body name="rocket" pos="0 0 30">
+      <freejoint name="root"/>
+      <inertial pos="0 0 0" mass="1000" diaginertia="9000 9000 130"/>
+      <!-- main fuselage, long axis along local Z, total length 10 m -->
+      <geom name="fuselage" type="cylinder" fromto="0 0 -5 0 0 5" size="0.5" material="body" mass="0" class="rocket"/>
+      <geom name="nosecone" type="capsule"  fromto="0 0 5 0 0 6.2" size="0.5" material="body" mass="0" class="rocket"/>
+      <!-- four landing legs: tips reach below the engine bell so they touch first -->
+      <geom name="leg1" type="capsule" fromto="0.5 0 -5 1.9 0 -6.1" size="0.07" material="dark" mass="0" class="rocket"/>
+      <geom name="leg2" type="capsule" fromto="-0.5 0 -5 -1.9 0 -6.1" size="0.07" material="dark" mass="0" class="rocket"/>
+      <geom name="leg3" type="capsule" fromto="0 0.5 -5 0 1.9 -6.1" size="0.07" material="dark" mass="0" class="rocket"/>
+      <geom name="leg4" type="capsule" fromto="0 -0.5 -5 0 -1.9 -6.1" size="0.07" material="dark" mass="0" class="rocket"/>
+
+      <!-- ===== Two-axis gimbaled nozzle (thrust vectoring) ===== -->
+      <body name="gimbal_x" pos="0 0 -5">
+        <joint name="gimbal_x" type="hinge" axis="1 0 0" range="-12 12"/>
+        <inertial pos="0 0 -0.2" mass="5" diaginertia="0.5 0.5 0.5"/>
+        <body name="gimbal_y" pos="0 0 0">
+          <joint name="gimbal_y" type="hinge" axis="0 1 0" range="-12 12"/>
+          <geom name="nozzle" type="cylinder" fromto="0 0 0 0 0 -0.8" size="0.4" material="dark" mass="50" class="rocket"/>
+          <!-- thrust site: +Z points up along the (possibly deflected) nozzle axis,
+               so a positive thrust pushes the rocket up; deflecting the gimbal
+               vectors the thrust and creates a control torque. -->
+          <site name="thrust" pos="0 0 0" zaxis="0 0 1" size="0.05"/>
+          <site name="flame" pos="0 0 -0.9" size="0.2" rgba="1 0.5 0.1 0"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- gimbal servos: position-controlled deflection angles (radians via ctrl, deg model) -->
+    <position name="gimbal_x" joint="gimbal_x" kp="8000" kv="400" ctrlrange="-0.21 0.21"/>
+    <position name="gimbal_y" joint="gimbal_y" kp="8000" kv="400" ctrlrange="-0.21 0.21"/>
+    <!-- main engine thrust along the nozzle +Z axis (Newtons) -->
+    <motor name="thrust" site="thrust" gear="0 0 1 0 0 0" ctrlrange="0 22000"/>
+  </actuator>
+
+  <sensor>
+    <framepos     name="rocket_pos"  objtype="body" objname="rocket"/>
+    <framequat    name="rocket_quat" objtype="body" objname="rocket"/>
+    <framelinvel  name="rocket_vel"  objtype="body" objname="rocket"/>
+    <frameangvel  name="rocket_avel" objtype="body" objname="rocket"/>
+    <framepos     name="marker_pos"  objtype="site" objname="h_marker"/>
+  </sensor>
+</mujoco>
