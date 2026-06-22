@@ -71,6 +71,10 @@ class RocketEnv:
                                "rocket_avel", "marker_pos")}
         self._sadr = {k: self.model.sensor_adr[v] for k, v in self._sid.items()}
         self.time = 0.0
+        # optional vision-estimated marker position (set by a vision wrapper).
+        # When present, observations/guidance use this instead of ground truth;
+        # termination metrics always use the true marker (honest scoring).
+        self.marker_estimate: Optional[np.ndarray] = None
 
     # ------------------------------------------------------------------ sensors
     def _sensor(self, name: str, dim: int) -> np.ndarray:
@@ -95,7 +99,15 @@ class RocketEnv:
 
     @property
     def marker_pos(self) -> np.ndarray:
+        """Ground-truth H-mark position (used for scoring)."""
         return self._sensor("marker_pos", 3)
+
+    @property
+    def marker_pos_meas(self) -> np.ndarray:
+        """Marker position as 'measured' by guidance: the vision estimate if a
+        vision wrapper has set one, otherwise ground truth."""
+        return self.marker_estimate if self.marker_estimate is not None \
+            else self.marker_pos
 
     @property
     def altitude(self) -> float:
@@ -138,6 +150,7 @@ class RocketEnv:
         self.data.qpos[3:7] = quat
         self.data.qvel[0:3] = vel
         self.data.qvel[3:6] = avel
+        self.marker_estimate = None
         mujoco.mj_forward(self.model, self.data)
         self.time = 0.0
         return self.get_obs()
@@ -174,7 +187,7 @@ class RocketEnv:
             [9:12] angular velocity
             [12]   altitude (leg-tip height above pad)
         """
-        rel = self.rocket_pos - self.marker_pos
+        rel = self.rocket_pos - self.marker_pos_meas
         vel = self.rocket_vel
         lean = utils.euler_from_axis(self.rocket_quat)
         bz = utils.body_axis(self.rocket_quat, 2)

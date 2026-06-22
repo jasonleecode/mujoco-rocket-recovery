@@ -27,6 +27,8 @@ def main():
     p.add_argument("--switch-altitude", dest="switch_altitude", type=float, default=12.0)
     p.add_argument("--episodes", type=int, default=100)
     p.add_argument("--seed", type=int, default=1000)
+    p.add_argument("--vision", action="store_true",
+                   help="close the loop on the onboard camera H-detector")
     args = p.parse_args()
 
     env = RocketEnv(EnvConfig(randomize=True))
@@ -39,6 +41,10 @@ def main():
             ctrl = mlp  # MLP for the whole descent (stress test)
         else:
             ctrl = TwoStageController(mlp=mlp, switch_altitude=args.switch_altitude)
+
+    if args.vision:
+        from rocket_landing.vision import HVisionSensor, VisionController
+        ctrl = VisionController(ctrl, HVisionSensor(env))
 
     metrics = evaluate(env, ctrl, n=args.episodes, base_seed=args.seed)
     print(json.dumps(metrics, indent=2))

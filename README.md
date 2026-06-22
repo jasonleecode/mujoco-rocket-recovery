@@ -11,8 +11,15 @@
 | **Stage 1 接近/减速** | `> 12 m` | **经典算法**(级联 PD 制导 + 姿态控制) | 把火箭飞到 H 标识正上方、刹住下降速度、保持竖直 |
 | **Stage 2 末端着陆** | `≤ 12 m` | **MLP 神经网络**(行为克隆训练) | 精准坐到 H 标识上,实现柔和触台 |
 
-闭环评测(50 次随机初始条件):**成功率 100%**,平均水平误差 **4.4 cm**,触台速度
-**0.70 m/s**,着陆倾角 **0.44°**。
+还支持**机载相机视觉识别 H 标识**闭环:火箭底部下视相机实时成像,经典视觉检测出 H 并
+反投影估计着陆点,替换"上帝视角"真值来对准。
+
+闭环评测(随机初始条件):
+
+| 制导信息来源 | 成功率 | 平均水平误差 | 触台速度 |
+|--------------|--------|--------------|----------|
+| 真值(上帝视角) | 100% (50/50) | **4.4 cm** | 0.70 m/s |
+| **机载相机识别 H** | 100% (20/20) | **6 cm** | 0.73 m/s |
 
 ---
 
@@ -46,6 +53,20 @@
 
 两阶段切换带迟滞,见 `rocket_landing/guidance.py`。
 
+### 相机识别 H 标识 (`rocket_landing/vision.py`)
+
+火箭底部装一个**下视相机**(随箭体姿态运动),识别流程:
+
+1. **渲染**机载相机图像;
+2. **分割**:对亮度高、饱和度低的像素阈值分割出白色 H(深色发射台、蓝色天空、深色腿/喷管均被排除);
+3. **质心 + 主轴**:取 H 像素质心与 PCA 主轴方向(朝向);
+4. **反投影**:用已知相机位姿(来自箭体 IMU 自身状态)把质心像素射线与台面求交,得到 H 的世界坐标估计;
+5. 该估计写入 `env.marker_estimate`,**替换真值**喂给观测与制导,实现纯视觉对准。
+
+`VisionController` 把任意控制器包装成视觉闭环。低于 ~7 m 后喷管/腿/尾焰会遮挡 H,故采用
+**低空锁定**:在 H 干净可见的高度锁住目标估计,再靠速度阻尼消除残差,避免末端遮挡偏差
+(实测水平误差从 0.36 m 降到 6 cm)。
+
 ### 观测向量 (13 维)
 
 ```
@@ -74,17 +95,25 @@ python scripts/run_sim.py
 # 2) 可视化运行:完整两阶段控制器(经典 → 已训练 MLP)
 python scripts/run_sim.py --policy models/mlp_policy.pt
 
-# 3) 无显示环境,直接打印结果
+# 3) 机载相机识别 H 闭环(视觉对准)
+python scripts/run_sim.py --policy models/mlp_policy.pt --vision
+
+# 4) 无显示环境,直接打印结果
 python scripts/run_sim.py --headless --policy models/mlp_policy.pt
 
-# 4) 重新训练末端 MLP(行为克隆)
+# 5) 渲染视频:外部视角 / 视觉双画面(机载相机 + H 检测叠加)
+python scripts/render_video.py --policy models/mlp_policy.pt --out landing.mp4
+python scripts/vision_demo.py  --policy models/mlp_policy.pt --out vision_landing.mp4
+
+# 6) 重新训练末端 MLP(行为克隆)
 python scripts/train_mlp.py --episodes 300 --epochs 200
 
-# 5) 批量评测
+# 7) 批量评测(加 --vision 走相机识别)
 python scripts/evaluate.py --controller two-stage --policy models/mlp_policy.pt --episodes 100
+python scripts/evaluate.py --controller two-stage --policy models/mlp_policy.pt --vision --episodes 50
 python scripts/evaluate.py --controller classical --episodes 100
 
-# 6) 测试
+# 8) 测试
 python -m pytest tests/ -q
 ```
 
@@ -98,15 +127,18 @@ mujoco_roket/
 ├── rocket_landing/
 │   ├── env.py                     # 仿真环境封装(动作/观测/奖励)
 │   ├── guidance.py                # 两阶段切换控制器
+│   ├── vision.py                  # 机载相机 H 标识检测 + 视觉闭环包装
 │   ├── rollout.py                 # 回合运行 / 评测
 │   ├── utils.py                   # 四元数/旋转工具
 │   └── controllers/
 │       ├── classical.py           # Stage 1 经典级联控制
 │       └── mlp.py                 # Stage 2 MLP 策略
 ├── scripts/
-│   ├── run_sim.py                 # 可视化/无头运行
+│   ├── run_sim.py                 # 可视化/无头运行(支持 --vision)
+│   ├── render_video.py            # 渲染着陆视频
+│   ├── vision_demo.py             # 渲染"外部 + 机载相机检测"双画面
 │   ├── train_mlp.py               # 行为克隆训练
-│   └── evaluate.py                # 批量评测
+│   └── evaluate.py                # 批量评测(支持 --vision)
 ├── tests/test_env.py
 └── models/mlp_policy.pt           # 训练好的末端策略
 ```
@@ -114,7 +146,7 @@ mujoco_roket/
 ## 后续可拓展
 
 - 用强化学习(PPO/SAC)替代行为克隆,进一步优化末端策略(`env.py` 已提供 shaped reward)。
-- 加入下视相机 + 视觉网络,从图像中检测 H 标识(当前用真值相对位姿模拟"对准")。
+- 把经典视觉检测换成学习式检测器(CNN 直接从图像回归 H 位姿),应对更复杂光照/纹理。
 - 风扰、推力延迟、传感器噪声等域随机化以提升鲁棒性。
 
 ## License

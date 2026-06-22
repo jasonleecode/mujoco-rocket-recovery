@@ -61,7 +61,7 @@ class ClassicalController:
         R = utils.quat2mat(quat)
         bz = R[:, 2]                       # body long axis in world
 
-        rel = (env.rocket_pos - env.marker_pos)
+        rel = (env.rocket_pos - env.marker_pos_meas)
         vel = env.rocket_vel
         avel_world = env.rocket_avel
         alt = env.altitude

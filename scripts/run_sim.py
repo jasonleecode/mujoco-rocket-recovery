@@ -27,13 +27,19 @@ from rocket_landing.controllers import ClassicalController, MLPController
 from rocket_landing.guidance import TwoStageController
 
 
-def build_controller(args):
+def build_controller(args, env):
     if args.policy and os.path.exists(args.policy):
         mlp = MLPController(checkpoint=args.policy)
         print(f"loaded MLP policy from {args.policy}")
-        return TwoStageController(mlp=mlp, switch_altitude=args.switch_altitude)
-    print("no policy -> classical controller for the whole descent")
-    return ClassicalController()
+        ctrl = TwoStageController(mlp=mlp, switch_altitude=args.switch_altitude)
+    else:
+        print("no policy -> classical controller for the whole descent")
+        ctrl = ClassicalController()
+    if args.vision:
+        from rocket_landing.vision import HVisionSensor, VisionController
+        print("vision-in-the-loop: aligning to the H from the onboard camera")
+        ctrl = VisionController(ctrl, HVisionSensor(env))
+    return ctrl
 
 
 def run_headless(env, controller):
@@ -88,12 +94,14 @@ def main():
     p.add_argument("--policy", default=None, help="path to trained MLP checkpoint")
     p.add_argument("--switch-altitude", dest="switch_altitude", type=float, default=12.0)
     p.add_argument("--headless", action="store_true")
+    p.add_argument("--vision", action="store_true",
+                   help="close the loop on the onboard camera H-detector")
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--no-randomize", dest="randomize", action="store_false")
     args = p.parse_args()
 
     env = RocketEnv(EnvConfig(seed=args.seed, randomize=args.randomize))
-    controller = build_controller(args)
+    controller = build_controller(args, env)
 
     if args.headless:
         run_headless(env, controller)

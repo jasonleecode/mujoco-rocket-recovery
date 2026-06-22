@@ -14,7 +14,7 @@
   <visual>
     <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
     <rgba haze="0.15 0.25 0.35 1"/>
-    <global azimuth="140" elevation="-20"/>
+    <global azimuth="140" elevation="-20" offwidth="1280" offheight="1280"/>
   </visual>
 
   <asset>
@@ -61,6 +61,9 @@
     <body name="rocket" pos="0 0 30">
       <freejoint name="root"/>
       <inertial pos="0 0 0" mass="1000" diaginertia="9000 9000 130"/>
+      <!-- downward-facing landing camera (offset from the engine axis so the
+           nozzle does not occlude the view); moves/tilts with the rocket -->
+      <camera name="downcam" pos="0.7 0 -4.8" zaxis="0 0 1" fovy="90"/>
       <!-- main fuselage, long axis along local Z, total length 10 m -->
       <geom name="fuselage" type="cylinder" fromto="0 0 -5 0 0 5" size="0.5" material="body" mass="0" class="rocket"/>
       <geom name="nosecone" type="capsule"  fromto="0 0 5 0 0 6.2" size="0.5" material="body" mass="0" class="rocket"/>

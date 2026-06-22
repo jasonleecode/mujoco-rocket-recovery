@@ -55,3 +55,31 @@ def test_two_stage_controller():
     out = run_episode(env, ctrl, seed=12345)
     assert out["outcome"] == "soft-landing"
     assert ctrl.stage == 2  # MLP took over for the terminal phase
+
+
+def test_vision_detector_locates_H():
+    """The camera H-detector back-projects the mark to within ~0.2 m up high."""
+    from rocket_landing.vision import HVisionSensor
+    env = RocketEnv(EnvConfig(seed=3, randomize=False))
+    sensor = HVisionSensor(env)
+    env.reset()
+    # fly down with the classical controller until the H is clearly visible
+    ctrl = ClassicalController()
+    while env.altitude > 7.0:
+        env.step(ctrl.act(env))
+    det = sensor.detect()
+    assert det.found
+    err = float(np.linalg.norm(det.marker_world[:2] - env.marker_pos[:2]))
+    assert err < 0.25
+
+
+def test_vision_in_the_loop_landing():
+    """Closing the loop on the camera still lands softly on the H."""
+    from rocket_landing.vision import HVisionSensor, VisionController
+    env = RocketEnv(EnvConfig(randomize=True))
+    sensor = HVisionSensor(env)
+    ctrl = VisionController(ClassicalController(), sensor)
+    out = run_episode(env, ctrl, seed=2001)
+    assert out["outcome"] == "soft-landing"
+    assert out["horiz_err"] < 1.0
+    assert ctrl.n_detections > 0  # the camera actually drove the alignment
