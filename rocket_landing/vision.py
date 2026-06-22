@@ -17,6 +17,7 @@ import numpy as np
 import mujoco
 
 from rocket_landing.env import PAD_TOP_Z
+from rocket_landing import utils
 
 
 @dataclass
@@ -44,6 +45,10 @@ class HVisionSensor:
         self.renderer = mujoco.Renderer(env.model, height, width)
         self.cam_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_CAMERA, camera)
         self.fovy = float(env.model.cam_fovy[self.cam_id])
+        # fixed camera mount transform relative to the rocket body (for
+        # back-projecting through the *estimated* pose when an estimator is on)
+        self.cam_pos_local = np.array(env.model.cam_pos[self.cam_id])
+        self.cam_mat_local = utils.quat2mat(env.model.cam_quat[self.cam_id])
         # precompute per-pixel ray tangents in the camera frame
         tan_v = np.tan(np.deg2rad(self.fovy) / 2.0)
         aspect = width / height
@@ -90,14 +95,31 @@ class HVisionSensor:
         return det
 
     # --------------------------------------------------- pixel -> world ground
+    def _camera_pose(self):
+        """World camera pose used for back-projection.
+
+        The image is always rendered from the true camera, but a navigation
+        system back-projects using its *believed* pose. When an estimator is
+        active we use the estimated body pose, so the absolute ego-localization
+        error cancels and the H is recovered relative to the rocket (only the
+        attitude error and pixel noise remain)."""
+        env = self.env
+        if env.use_estimate and env.estimate is not None:
+            Rb = utils.quat2mat(env.estimate.quat)
+            cam_pos = env.estimate.pos + Rb @ self.cam_pos_local
+            cam_mat = Rb @ self.cam_mat_local
+        else:
+            cam_pos = np.array(env.data.cam_xpos[self.cam_id])
+            cam_mat = np.array(env.data.cam_xmat[self.cam_id]).reshape(3, 3)
+        return cam_pos, cam_mat
+
     def _backproject(self, col: float, row: float) -> Optional[np.ndarray]:
         """Intersect the camera ray through (col,row) with the pad-top plane."""
         ci = int(round(np.clip(col, 0, self.width - 1)))
         ri = int(round(np.clip(row, 0, self.height - 1)))
         # ray direction in camera frame (camera looks along -z, +y up)
         d_cam = np.array([self._cols_t[ci], -self._rows_t[ri], -1.0])
-        cam_pos = np.array(self.env.data.cam_xpos[self.cam_id])
-        cam_mat = np.array(self.env.data.cam_xmat[self.cam_id]).reshape(3, 3)
+        cam_pos, cam_mat = self._camera_pose()
         d_world = cam_mat @ d_cam
         if d_world[2] >= -1e-6:                       # ray not pointing down
             return None

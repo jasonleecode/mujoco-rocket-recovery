@@ -61,6 +61,8 @@
     <body name="rocket" pos="0 0 30">
       <freejoint name="root"/>
       <inertial pos="0 0 0" mass="1000" diaginertia="9000 9000 130"/>
+      <!-- IMU package mounted at the CoM (gyro + accelerometer) -->
+      <site name="imu" pos="0 0 0" size="0.05" rgba="0 1 0 0"/>
       <!-- downward-facing landing camera (offset from the engine axis so the
            nozzle does not occlude the view); moves/tilts with the rocket -->
       <camera name="downcam" pos="0.7 0 -4.8" zaxis="0 0 1" fovy="90"/>
@@ -99,10 +101,15 @@
   </actuator>
 
   <sensor>
+    <!-- ground-truth frame sensors (used for scoring and to synthesize the
+         noisy IMU/GPS measurements that the estimator actually consumes) -->
     <framepos     name="rocket_pos"  objtype="body" objname="rocket"/>
     <framequat    name="rocket_quat" objtype="body" objname="rocket"/>
     <framelinvel  name="rocket_vel"  objtype="body" objname="rocket"/>
     <frameangvel  name="rocket_avel" objtype="body" objname="rocket"/>
     <framepos     name="marker_pos"  objtype="site" objname="h_marker"/>
+    <!-- onboard IMU: body-frame angular rate and specific force -->
+    <gyro          name="imu_gyro"  site="imu"/>
+    <accelerometer name="imu_accel" site="imu"/>
   </sensor>
 </mujoco>

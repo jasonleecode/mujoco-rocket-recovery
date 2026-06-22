@@ -11,15 +11,17 @@
 | **Stage 1 接近/减速** | `> 12 m` | **经典算法**(级联 PD 制导 + 姿态控制) | 把火箭飞到 H 标识正上方、刹住下降速度、保持竖直 |
 | **Stage 2 末端着陆** | `≤ 12 m` | **MLP 神经网络**(行为克隆训练) | 精准坐到 H 标识上,实现柔和触台 |
 
-还支持**机载相机视觉识别 H 标识**闭环:火箭底部下视相机实时成像,经典视觉检测出 H 并
-反投影估计着陆点,替换"上帝视角"真值来对准。
+还实现了**接近真机的传感/导航链路**:火箭不再直接读仿真真值,而是靠机载 **IMU(陀螺+加速度计)+ GPS**
+经 **INS/GNSS 松组合状态估计**算出自身位姿,制导跑在估计值上;另有**下视相机识别 H 标识**
+做视觉对准。真值只用于合成带噪声的传感器测量和最终评分。
 
 闭环评测(随机初始条件):
 
-| 制导信息来源 | 成功率 | 平均水平误差 | 触台速度 |
+| 制导/导航信息来源 | 成功率 | 平均水平误差 | 触台速度 |
 |--------------|--------|--------------|----------|
-| 真值(上帝视角) | 100% (50/50) | **4.4 cm** | 0.70 m/s |
-| **机载相机识别 H** | 100% (20/20) | **6 cm** | 0.73 m/s |
+| 真值(上帝视角) | 100% (50/50) | 4.4 cm | 0.70 m/s |
+| 机载相机识别 H(真值自定位) | 100% (20/20) | 6 cm | 0.73 m/s |
+| **IMU + GPS 状态估计**(真机链路) | **100% (40/40)** | **0.36 m** | 0.70 m/s |
 
 ---
 
@@ -67,6 +69,26 @@
 **低空锁定**:在 H 干净可见的高度锁住目标估计,再靠速度阻尼消除残差,避免末端遮挡偏差
 (实测水平误差从 0.36 m 降到 6 cm)。
 
+### 传感器与状态估计 (`rocket_landing/estimator.py`)
+
+为接近真机,火箭不直接读仿真真值,而是携带带噪声/零偏的传感器,再做 **INS/GNSS 松组合估计**:
+
+- **IMU**:`<gyro>`(机体角速度)+ `<accelerometer>`(机体比力),导航级噪声/零偏。
+- **GPS**:差分级,~10 Hz,输出含噪位置 + 多普勒测速。
+- **姿态**:捷联**陀螺积分**(`mju_quatIntegrate`)。⚠️ 关键点:带动力飞行时比力 ≈ 推力/m
+  沿机体轴、重力被抵消,**加速度计几乎不含姿态信息**,强行用它修正姿态会把估计往"竖直"
+  方向拉偏并在闭环中正反馈发散——所以动力段姿态靠陀螺(发射前已精对准),加计仅在近 1g
+  比力(滑行段)做微量校正。
+- **位置/速度**:加速度计**捷联 INS 机械编排**(比力转世界系 + 重力 → 积分),由 GPS 位置/速度
+  低频校正(松组合 α-β 滤波)。
+
+`EstimationController` 把任意控制器包装成"跑在估计状态上"。`env` 提供真值/估计双通道:
+`use_estimate=True` 时观测与制导读估计值,而**评分始终用真值**(诚实打分)。整条链路即
+**含噪传感器 → 状态估计 → 制导 → 控制**,与真实飞行器一致。
+
+> 注:本估计器是松组合滤波,自定位精度受 GPS 限制(分米级)。把视觉作为量测做**紧组合
+> 视觉-惯性 EKF**(让相机相对量测直接修正状态)是更进一步的方向,见下文。
+
 ### 观测向量 (13 维)
 
 ```
@@ -98,6 +120,9 @@ python scripts/run_sim.py --policy models/mlp_policy.pt
 # 3) 机载相机识别 H 闭环(视觉对准)
 python scripts/run_sim.py --policy models/mlp_policy.pt --vision
 
+# 3b) 真机导航链路:制导跑在 IMU+GPS 融合估计上(可叠加 --vision)
+python scripts/run_sim.py --policy models/mlp_policy.pt --estimator
+
 # 4) 无显示环境,直接打印结果
 python scripts/run_sim.py --headless --policy models/mlp_policy.pt
 
@@ -108,10 +133,10 @@ python scripts/vision_demo.py  --policy models/mlp_policy.pt --out vision_landin
 # 6) 重新训练末端 MLP(行为克隆)
 python scripts/train_mlp.py --episodes 300 --epochs 200
 
-# 7) 批量评测(加 --vision 走相机识别)
+# 7) 批量评测(--vision 走相机识别;--estimator 走 IMU+GPS 估计)
 python scripts/evaluate.py --controller two-stage --policy models/mlp_policy.pt --episodes 100
 python scripts/evaluate.py --controller two-stage --policy models/mlp_policy.pt --vision --episodes 50
-python scripts/evaluate.py --controller classical --episodes 100
+python scripts/evaluate.py --controller two-stage --policy models/mlp_policy.pt --estimator --episodes 50
 
 # 8) 测试
 python -m pytest tests/ -q
@@ -128,6 +153,7 @@ mujoco_roket/
 │   ├── env.py                     # 仿真环境封装(动作/观测/奖励)
 │   ├── guidance.py                # 两阶段切换控制器
 │   ├── vision.py                  # 机载相机 H 标识检测 + 视觉闭环包装
+│   ├── estimator.py               # IMU+GPS INS/GNSS 状态估计 + 估计闭环包装
 │   ├── rollout.py                 # 回合运行 / 评测
 │   ├── utils.py                   # 四元数/旋转工具
 │   └── controllers/
@@ -145,9 +171,11 @@ mujoco_roket/
 
 ## 后续可拓展
 
+- **紧组合视觉-惯性 EKF**:把相机对 H 的相对量测直接并入状态估计,突破纯 GPS 的分米级定位,
+  实现厘米级精着陆(当前松组合下视觉增益有限)。
 - 用强化学习(PPO/SAC)替代行为克隆,进一步优化末端策略(`env.py` 已提供 shaped reward)。
 - 把经典视觉检测换成学习式检测器(CNN 直接从图像回归 H 位姿),应对更复杂光照/纹理。
-- 风扰、推力延迟、传感器噪声等域随机化以提升鲁棒性。
+- 在线估计陀螺/加计零偏(扩展 EKF 状态),加风扰、推力延迟等域随机化提升鲁棒性。
 
 ## License
 

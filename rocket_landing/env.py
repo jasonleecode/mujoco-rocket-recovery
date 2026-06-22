@@ -68,34 +68,81 @@ class RocketEnv:
 
         self._sid = {n: mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, n)
                      for n in ("rocket_pos", "rocket_quat", "rocket_vel",
-                               "rocket_avel", "marker_pos")}
+                               "rocket_avel", "marker_pos", "imu_gyro",
+                               "imu_accel")}
         self._sadr = {k: self.model.sensor_adr[v] for k, v in self._sid.items()}
         self.time = 0.0
         # optional vision-estimated marker position (set by a vision wrapper).
         # When present, observations/guidance use this instead of ground truth;
         # termination metrics always use the true marker (honest scoring).
         self.marker_estimate: Optional[np.ndarray] = None
+        # optional ego-state estimate (set by a StateEstimator wrapper). When
+        # use_estimate is True, guidance/observations read the estimate while
+        # scoring still uses ground truth.
+        self.estimate = None
+        self.use_estimate = False
 
     # ------------------------------------------------------------------ sensors
     def _sensor(self, name: str, dim: int) -> np.ndarray:
         a = self._sadr[name]
         return np.array(self.data.sensordata[a:a + dim])
 
+    # -- ground-truth state (used for scoring + to synthesize IMU/GPS) --
     @property
-    def rocket_pos(self) -> np.ndarray:
+    def pos_true(self) -> np.ndarray:
         return self._sensor("rocket_pos", 3)
 
     @property
-    def rocket_quat(self) -> np.ndarray:
+    def quat_true(self) -> np.ndarray:
         return self._sensor("rocket_quat", 4)
 
     @property
-    def rocket_vel(self) -> np.ndarray:
+    def vel_true(self) -> np.ndarray:
         return self._sensor("rocket_vel", 3)
 
     @property
-    def rocket_avel(self) -> np.ndarray:
+    def avel_true(self) -> np.ndarray:
+        """True angular velocity in the world frame."""
         return self._sensor("rocket_avel", 3)
+
+    @property
+    def imu_gyro(self) -> np.ndarray:
+        """True body-frame angular rate (the gyro measures this + noise/bias)."""
+        return self._sensor("imu_gyro", 3)
+
+    @property
+    def imu_accel(self) -> np.ndarray:
+        """True body-frame specific force (accelerometer measures this + noise)."""
+        return self._sensor("imu_accel", 3)
+
+    @property
+    def altitude_true(self) -> float:
+        return float(self.pos_true[2] - LEG_TIP_OFFSET - PAD_TOP_Z)
+
+    # -- state seen by guidance: estimator output if present, else truth --
+    @property
+    def rocket_pos(self) -> np.ndarray:
+        if self.use_estimate and self.estimate is not None:
+            return self.estimate.pos
+        return self.pos_true
+
+    @property
+    def rocket_quat(self) -> np.ndarray:
+        if self.use_estimate and self.estimate is not None:
+            return self.estimate.quat
+        return self.quat_true
+
+    @property
+    def rocket_vel(self) -> np.ndarray:
+        if self.use_estimate and self.estimate is not None:
+            return self.estimate.vel
+        return self.vel_true
+
+    @property
+    def rocket_avel(self) -> np.ndarray:
+        if self.use_estimate and self.estimate is not None:
+            return self.estimate.avel
+        return self.avel_true
 
     @property
     def marker_pos(self) -> np.ndarray:
@@ -111,7 +158,7 @@ class RocketEnv:
 
     @property
     def altitude(self) -> float:
-        """Leg-tip height above the pad top (m)."""
+        """Leg-tip height above the pad top (m), from the guidance state."""
         return float(self.rocket_pos[2] - LEG_TIP_OFFSET - PAD_TOP_Z)
 
     # ------------------------------------------------------------------- reset
@@ -151,6 +198,8 @@ class RocketEnv:
         self.data.qvel[0:3] = vel
         self.data.qvel[3:6] = avel
         self.marker_estimate = None
+        self.estimate = None
+        self.use_estimate = False
         mujoco.mj_forward(self.model, self.data)
         self.time = 0.0
         return self.get_obs()
@@ -196,11 +245,12 @@ class RocketEnv:
 
     # -------------------------------------------------------------- bookkeeping
     def _termination(self):
+        # scoring always uses ground truth, never the estimator/vision output
         info = {}
-        pos = self.rocket_pos
-        vel = self.rocket_vel
-        tilt = utils.tilt_angle(self.rocket_quat)
-        alt = self.altitude
+        pos = self.pos_true
+        vel = self.vel_true
+        tilt = utils.tilt_angle(self.quat_true)
+        alt = self.altitude_true
         horiz_err = float(np.linalg.norm((pos - self.marker_pos)[:2]))
         info.update(altitude=alt, horiz_err=horiz_err, tilt=tilt,
                     speed=float(np.linalg.norm(vel)), vz=float(vel[2]))
@@ -227,9 +277,9 @@ class RocketEnv:
 
     def _reward(self, action, info) -> float:
         """Shaped reward (used if training the MLP with RL; BC ignores it)."""
-        pos = self.rocket_pos - self.marker_pos
-        vel = self.rocket_vel
-        tilt = utils.tilt_angle(self.rocket_quat)
+        pos = self.pos_true - self.marker_pos
+        vel = self.vel_true
+        tilt = utils.tilt_angle(self.quat_true)
         r = 0.0
         r -= 0.02 * np.linalg.norm(pos[:2])      # stay over the pad
         r -= 0.05 * abs(vel[2] + 1.0)            # track ~1 m/s descent

@@ -39,6 +39,10 @@ def build_controller(args, env):
         from rocket_landing.vision import HVisionSensor, VisionController
         print("vision-in-the-loop: aligning to the H from the onboard camera")
         ctrl = VisionController(ctrl, HVisionSensor(env))
+    if args.estimator:
+        from rocket_landing.estimator import StateEstimator, EstimationController
+        print("onboard estimation: guidance runs on fused IMU + GPS, not truth")
+        ctrl = EstimationController(ctrl, StateEstimator(env))
     return ctrl
 
 
@@ -96,6 +100,8 @@ def main():
     p.add_argument("--headless", action="store_true")
     p.add_argument("--vision", action="store_true",
                    help="close the loop on the onboard camera H-detector")
+    p.add_argument("--estimator", action="store_true",
+                   help="run guidance on fused IMU+GPS state instead of truth")
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--no-randomize", dest="randomize", action="store_false")
     args = p.parse_args()

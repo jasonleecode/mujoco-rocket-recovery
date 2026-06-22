@@ -73,6 +73,55 @@ def test_vision_detector_locates_H():
     assert err < 0.25
 
 
+def test_imu_specific_force_upright():
+    """A near-hovering upright rocket reads ~+g on the body-z accelerometer."""
+    env = RocketEnv(EnvConfig(seed=0, randomize=False))
+    env.reset()
+    hover = env.mass * env.gravity / env.max_thrust
+    for _ in range(40):
+        env.step(np.array([hover, 0.0, 0.0]))
+    accel = env.imu_accel
+    assert abs(accel[2] - env.gravity) < 0.5
+    assert np.linalg.norm(accel[:2]) < 0.5
+
+
+def test_estimator_tracks_truth():
+    """INS/GPS estimate converges to the true state during a descent."""
+    from rocket_landing.estimator import StateEstimator
+    from rocket_landing.utils import body_axis
+    env = RocketEnv(EnvConfig(seed=5, randomize=True))
+    env.reset()
+    ctrl = ClassicalController()
+    est = StateEstimator(env, seed=1)
+    est.reset()
+    pos_err, att_err = [], []
+    done = False
+    while not done:
+        action = ctrl.act(env)          # control on truth: isolate estimator
+        s = est.update()
+        pos_err.append(np.linalg.norm(s.pos - env.pos_true))
+        cos = np.clip(body_axis(env.quat_true, 2) @ body_axis(s.quat, 2), -1, 1)
+        att_err.append(np.degrees(np.arccos(cos)))
+        done = env.step(action).done
+    half = len(pos_err) // 2
+    assert np.mean(pos_err[half:]) < 1.0       # GPS-bounded position
+    assert np.mean(att_err[half:]) < 4.0       # gyro-integrated attitude
+
+
+@pytest.mark.skipif(not os.path.exists("models/mlp_policy.pt"),
+                    reason="trained MLP policy not present")
+def test_estimation_in_the_loop_landing():
+    """Guidance on fused IMU+GPS state still lands softly."""
+    from rocket_landing.estimator import StateEstimator, EstimationController
+    from rocket_landing.guidance import TwoStageController
+    env = RocketEnv(EnvConfig(randomize=True))
+    base = TwoStageController(mlp=MLPController(checkpoint="models/mlp_policy.pt"))
+    ctrl = EstimationController(base, StateEstimator(env, seed=7))
+    successes = sum(run_episode(env, ctrl, seed=5000 + s).get("success", False)
+                    for s in range(8))
+    assert successes >= 7   # robust soft landings on estimated state
+
+
 def test_vision_in_the_loop_landing():
     """Closing the loop on the camera still lands softly on the H."""
     from rocket_landing.vision import HVisionSensor, VisionController

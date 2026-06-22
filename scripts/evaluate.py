@@ -29,6 +29,8 @@ def main():
     p.add_argument("--seed", type=int, default=1000)
     p.add_argument("--vision", action="store_true",
                    help="close the loop on the onboard camera H-detector")
+    p.add_argument("--estimator", action="store_true",
+                   help="run guidance on fused IMU+GPS state instead of truth")
     args = p.parse_args()
 
     env = RocketEnv(EnvConfig(randomize=True))
@@ -45,6 +47,9 @@ def main():
     if args.vision:
         from rocket_landing.vision import HVisionSensor, VisionController
         ctrl = VisionController(ctrl, HVisionSensor(env))
+    if args.estimator:
+        from rocket_landing.estimator import StateEstimator, EstimationController
+        ctrl = EstimationController(ctrl, StateEstimator(env))
 
     metrics = evaluate(env, ctrl, n=args.episodes, base_seed=args.seed)
     print(json.dumps(metrics, indent=2))
