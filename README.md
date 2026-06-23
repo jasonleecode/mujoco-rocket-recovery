@@ -1,5 +1,9 @@
 # 🚀 MuJoCo 火箭回收仿真 (Vector-Thrust Rocket Recovery)
 
+<p align="center">
+  <img src="assets/landing.png" width="560" alt="矢量推力火箭对准 H 标识垂直回收着陆"/>
+</p>
+
 在 [MuJoCo](https://mujoco.org/) 中仿真一枚**矢量推力火箭的垂直回收着陆**:火箭底部是一个
 **两轴万向矢量喷嘴 (gimbaled TVC nozzle)**,发射台上有一个 **H 形着陆标识**,火箭在下降段
 对准 H 标识完成精准软着陆。
