@@ -82,6 +82,18 @@ class RocketEnv:
         self.estimate = None
         self.use_estimate = False
 
+        # exhaust-plume geoms: (geom id, top-anchor local z, max length, base rgb)
+        self._flame = []
+        for name, z_top, lmax in (("flame_outer", -0.8, 3.2),
+                                  ("flame_core", -0.8, 2.2)):
+            gid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            if gid >= 0:
+                mat = self.model.geom_matid[gid]
+                rgb = self.model.mat_rgba[mat][:3].copy() if mat >= 0 \
+                    else np.array([1.0, 0.4, 0.1])
+                self._flame.append((gid, z_top, lmax, rgb))
+        self.set_flame(0.0)
+
     # ------------------------------------------------------------------ sensors
     def _sensor(self, name: str, dim: int) -> np.ndarray:
         a = self._sadr[name]
@@ -160,6 +172,26 @@ class RocketEnv:
     def altitude(self) -> float:
         """Leg-tip height above the pad top (m), from the guidance state."""
         return float(self.rocket_pos[2] - LEG_TIP_OFFSET - PAD_TOP_Z)
+
+    # ----------------------------------------------------------------- visuals
+    def set_flame(self, throttle: float) -> None:
+        """Scale the exhaust plume length/opacity with throttle (visual only).
+
+        The plume geoms hang off the gimbaled nozzle, so they sweep with the
+        thrust vector and make the TVC deflection easy to see.
+        """
+        t = float(np.clip(throttle, 0.0, 1.0))
+        on = t > 0.02
+        for gid, z_top, lmax, rgb in self._flame:
+            # keep the plume substantial even at cruise throttle, with flicker
+            flicker = 1.0 + 0.05 * np.sin(self.time * 60.0)
+            length = lmax * (0.45 + 0.55 * t) * flicker if on else 0.0
+            self.model.geom_size[gid][1] = max(length / 2.0, 1e-4)
+            self.model.geom_pos[gid][2] = z_top - length / 2.0
+            # write full RGBA: touching geom_rgba makes the renderer ignore the
+            # material, so we must supply the flame colour, not just the alpha.
+            self.model.geom_rgba[gid][:3] = rgb
+            self.model.geom_rgba[gid][3] = (0.4 + 0.55 * t) if on else 0.0
 
     # ------------------------------------------------------------------- reset
     def reset(self, randomize: Optional[bool] = None) -> np.ndarray:

@@ -49,13 +49,12 @@ def main():
     cam = mujoco.MjvCamera()
     cam.azimuth = 130
     cam.elevation = -12
-    flame_sid = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_SITE, "flame")
 
     frames = []
     done = False
     while not done:
         action = controller.act(env)
-        env.model.site_rgba[flame_sid][3] = 0.3 + 0.6 * float(action[0])
+        env.set_flame(action[0])
         result = env.step(action)
         done = result.done
         # track the rocket, easing the camera distance with altitude

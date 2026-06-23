@@ -54,7 +54,6 @@ def main():
     ext = mujoco.Renderer(env.model, args.size, args.size)
     cam = mujoco.MjvCamera()
     cam.azimuth, cam.elevation = 130, -12
-    flame_sid = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_SITE, "flame")
 
     frames = []
     done = False
@@ -69,7 +68,7 @@ def main():
         action = base.act(env)
         controller.n_steps += 1
 
-        env.model.site_rgba[flame_sid][3] = 0.3 + 0.6 * float(action[0])
+        env.set_flame(action[0])
 
         # onboard panel: highlight detected H pixels + centroid cross
         panel = det.image.copy()

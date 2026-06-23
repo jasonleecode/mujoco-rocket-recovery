@@ -69,13 +69,10 @@ def run_viewer(env, controller, realtime=True):
         controller.reset()
 
     with mujoco.viewer.launch_passive(env.model, env.data) as viewer:
-        stage = getattr(controller, "stage", 1)
         while viewer.is_running():
             t0 = time.time()
             action = controller.act(env)
-            # show the engine plume scaled with throttle
-            flame_sid = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_SITE, "flame")
-            env.model.site_rgba[flame_sid][3] = 0.3 + 0.6 * float(action[0])
+            env.set_flame(action[0])     # engine plume sweeps with the gimbal
             result = env.step(action)
             viewer.sync()
             if result.done:
@@ -104,9 +101,18 @@ def main():
                    help="run guidance on fused IMU+GPS state instead of truth")
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--no-randomize", dest="randomize", action="store_false")
+    p.add_argument("--init-tilt", type=float, default=None,
+                   help="initial tilt (deg); large values exercise the TVC gimbal")
+    p.add_argument("--init-xy", type=float, default=None,
+                   help="initial horizontal offset magnitude (m)")
     args = p.parse_args()
 
-    env = RocketEnv(EnvConfig(seed=args.seed, randomize=args.randomize))
+    cfg = EnvConfig(seed=args.seed, randomize=args.randomize)
+    if args.init_tilt is not None:
+        cfg.init_tilt_deg = args.init_tilt
+    if args.init_xy is not None:
+        cfg.init_xy_range = args.init_xy
+    env = RocketEnv(cfg)
     controller = build_controller(args, env)
 
     if args.headless:

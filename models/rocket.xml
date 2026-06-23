@@ -26,7 +26,8 @@
     <material name="mark"  rgba="0.95 0.95 0.95 1"/>
     <material name="body"  rgba="0.85 0.85 0.88 1" reflectance="0.3"/>
     <material name="dark"  rgba="0.2 0.2 0.22 1"/>
-    <material name="flame" rgba="1.0 0.5 0.1 1"/>
+    <material name="flame" rgba="0.98 0.30 0.03 1" emission="0.35" specular="0" shininess="0"/>
+    <material name="flamecore" rgba="1.0 0.62 0.12 1" emission="0.5" specular="0" shininess="0"/>
   </asset>
 
   <default>
@@ -86,7 +87,13 @@
                so a positive thrust pushes the rocket up; deflecting the gimbal
                vectors the thrust and creates a control torque. -->
           <site name="thrust" pos="0 0 0" zaxis="0 0 1" size="0.05"/>
-          <site name="flame" pos="0 0 -0.9" size="0.2" rgba="1 0.5 0.1 0"/>
+          <!-- exhaust plume: rigidly attached below the nozzle, so it sweeps
+               with the gimbal and visualizes the thrust-vector direction.
+               Length/opacity are scaled with throttle at runtime (set_flame). -->
+          <geom name="flame_outer" type="capsule" fromto="0 0 -0.8 0 0 -4.0" size="0.36"
+                material="flame" mass="0" contype="0" conaffinity="0"/>
+          <geom name="flame_core" type="capsule" fromto="0 0 -0.8 0 0 -3.0" size="0.17"
+                material="flamecore" mass="0" contype="0" conaffinity="0"/>
         </body>
       </body>
     </body>
