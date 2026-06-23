@@ -60,11 +60,33 @@ def run_headless(env, controller):
           f"tilt={np.rad2deg(info['tilt']):.1f}deg")
 
 
+def telemetry_overlay(controller, tel, info):
+    """Build the (labels, values) two-column strings for the viewer overlay."""
+    stage = getattr(controller, "stage", 1)
+    phase = "MLP terminal" if stage == 2 else "classical approach"
+    labels = "\n".join(["PHASE", "Roll", "Pitch", "Yaw", "Thrust", "Throttle",
+                        "Gimbal X", "Gimbal Y", "Altitude", "Speed", "V-Speed"])
+    values = "\n".join([
+        phase,
+        f"{tel['roll_deg']:+.1f} deg",
+        f"{tel['pitch_deg']:+.1f} deg",
+        f"{tel['yaw_deg']:+.1f} deg",
+        f"{tel['thrust_kN']:.1f} kN",
+        f"{tel['throttle_pct']:.0f} %",
+        f"{tel['gimbal_x_deg']:+.1f} deg",
+        f"{tel['gimbal_y_deg']:+.1f} deg",
+        f"{tel['altitude_m']:.1f} m",
+        f"{tel['speed_mps']:.2f} m/s",
+        f"{tel['vspeed_mps']:+.2f} m/s",
+    ])
+    return labels, values
+
+
 def run_viewer(env, controller, realtime=True):
     import mujoco
     import mujoco.viewer
 
-    obs = env.reset()
+    env.reset()
     if hasattr(controller, "reset"):
         controller.reset()
 
@@ -74,6 +96,10 @@ def run_viewer(env, controller, realtime=True):
             action = controller.act(env)
             env.set_flame(action[0])     # engine plume sweeps with the gimbal
             result = env.step(action)
+            tel = env.set_telemetry()
+            labels, values = telemetry_overlay(controller, tel, result.info)
+            viewer.set_texts((mujoco.mjtFontScale.mjFONTSCALE_150,
+                              mujoco.mjtGridPos.mjGRID_TOPRIGHT, labels, values))
             viewer.sync()
             if result.done:
                 info = result.info

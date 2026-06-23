@@ -82,6 +82,15 @@ class RocketEnv:
         self.estimate = None
         self.use_estimate = False
 
+        # telemetry user-sensor addresses (shown live in the viewer Sensor panel)
+        self._telemetry = {}
+        for name in ("roll_deg", "pitch_deg", "yaw_deg", "thrust_kN",
+                     "throttle_pct", "gimbal_x_deg", "gimbal_y_deg",
+                     "altitude_m", "speed_mps", "vspeed_mps"):
+            sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, name)
+            if sid >= 0:
+                self._telemetry[name] = self.model.sensor_adr[sid]
+
         # exhaust-plume geoms: (geom id, top-anchor local z, max length, base rgb)
         self._flame = []
         for name, z_top, lmax in (("flame_outer", -0.8, 3.2),
@@ -192,6 +201,32 @@ class RocketEnv:
             # material, so we must supply the flame colour, not just the alpha.
             self.model.geom_rgba[gid][:3] = rgb
             self.model.geom_rgba[gid][3] = (0.4 + 0.55 * t) if on else 0.0
+
+    def set_telemetry(self) -> dict:
+        """Write live readouts (attitude, thrust, gimbal, speeds) into the
+        telemetry user sensors so they show in the viewer's Sensor panel.
+
+        Call this after ``step`` and before ``viewer.sync()`` -- ``mj_step``
+        clears user sensors, so the values must be (re)written each frame.
+        Returns the readout dict for optional text/HUD use.
+        """
+        roll, pitch, yaw = np.rad2deg(utils.quat2euler(self.quat_true))
+        vel = self.vel_true
+        readout = {
+            "roll_deg": float(roll),
+            "pitch_deg": float(pitch),
+            "yaw_deg": float(yaw),
+            "thrust_kN": float(self.data.ctrl[2] / 1000.0),
+            "throttle_pct": float(100.0 * self.data.ctrl[2] / self.max_thrust),
+            "gimbal_x_deg": float(np.rad2deg(self.data.qpos[7])),
+            "gimbal_y_deg": float(np.rad2deg(self.data.qpos[8])),
+            "altitude_m": float(self.altitude_true),
+            "speed_mps": float(np.linalg.norm(vel)),
+            "vspeed_mps": float(vel[2]),
+        }
+        for name, adr in self._telemetry.items():
+            self.data.sensordata[adr] = readout[name]
+        return readout
 
     # ------------------------------------------------------------------- reset
     def reset(self, randomize: Optional[bool] = None) -> np.ndarray:

@@ -112,6 +112,7 @@ pip install -r requirements.txt   # mujoco, numpy, torch
 
 ```bash
 # 1) 可视化运行:仅经典控制器
+#    查看器右上角实时显示遥测面板:roll/pitch/yaw、推力、油门、矢量角、高度、速度
 python scripts/run_sim.py
 
 # 2) 可视化运行:完整两阶段控制器(经典 → 已训练 MLP)

@@ -118,5 +118,17 @@
     <!-- onboard IMU: body-frame angular rate and specific force -->
     <gyro          name="imu_gyro"  site="imu"/>
     <accelerometer name="imu_accel" site="imu"/>
+    <!-- telemetry readouts shown live in the viewer's Sensor panel; values are
+         written each frame by env.set_telemetry() (see rocket_landing/env.py) -->
+    <user name="roll_deg"     dim="1" needstage="vel"/>
+    <user name="pitch_deg"    dim="1" needstage="vel"/>
+    <user name="yaw_deg"      dim="1" needstage="vel"/>
+    <user name="thrust_kN"    dim="1" needstage="vel"/>
+    <user name="throttle_pct" dim="1" needstage="vel"/>
+    <user name="gimbal_x_deg" dim="1" needstage="vel"/>
+    <user name="gimbal_y_deg" dim="1" needstage="vel"/>
+    <user name="altitude_m"   dim="1" needstage="vel"/>
+    <user name="speed_mps"    dim="1" needstage="vel"/>
+    <user name="vspeed_mps"   dim="1" needstage="vel"/>
   </sensor>
 </mujoco>
